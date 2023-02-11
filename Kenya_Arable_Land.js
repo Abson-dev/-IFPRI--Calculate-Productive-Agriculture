@@ -11,15 +11,7 @@ var Hansen_GFC = ee.Image("UMD/hansen/global_forest_change_2020_v1_8"),
     GFSAD30AFCE_2015_KEN_3 = ee.Image("projects/ee-aboubacarhema94/assets/Kenya/GFSAD30AFCE_2015_KEN_3"),
     GFSAD30AFCE_2015_KEN_4 = ee.Image("projects/ee-aboubacarhema94/assets/Kenya/GFSAD30AFCE_2015_KEN_4"),
     imperviousSurface = ee.Image("Tsinghua/FROM-GLC/GAIA/v10"),
-    geometry = 
-    /* color: #d63000 */
-    /* shown: false */
-    /* displayProperties: [
-      {
-        "type": "rectangle"
-      }
-    ] */
-    ee.Geometry.Polygon(
+    geometry = ee.Geometry.Polygon(
         [[[33.487619647710574, 5.262415464986558],
           [33.487619647710574, -5.182074987365432],
           [43.309396991460574, -5.182074987365432],
