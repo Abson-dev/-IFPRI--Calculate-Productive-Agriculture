@@ -1,83 +1,84 @@
-var GFSAD1000 = ee.Image("USGS/GFSAD1000_V1"),
-    GAUL_adm0 = ee.FeatureCollection("FAO/GAUL/2015/level0"),
-    GAUL_adm2 = ee.FeatureCollection("FAO/GAUL/2015/level2"),
-    Hansen_GFC = ee.Image("UMD/hansen/global_forest_change_2020_v1_8"),
+var Hansen_GFC = ee.Image("UMD/hansen/global_forest_change_2020_v1_8"),
     SRTM = ee.Image("USGS/SRTMGL1_003"),
     surfaceWater = ee.Image("JRC/GSW1_3/GlobalSurfaceWater"),
     imperviousSurface = ee.Image("Tsinghua/FROM-GLC/GAIA/v10"),
-    GFSAD30AFCE_2015_BF_2 = ee.Image("projects/ee-aboubacarhema94/assets/GFSAD30AFCE_2015_BF_2"),
-    GFSAD30AFCE_2015_BF_3 = ee.Image("projects/ee-aboubacarhema94/assets/GFSAD30AFCE_2015_BF_3"),
-    GFSAD30AFCE_2015_BF_1 = ee.Image("projects/ee-aboubacarhema94/assets/GFSAD30AFCE_2015_BF_1");
+    GFSAD30AFCE_2015_BF_1 = ee.Image("projects/ee-aboubacarhema94/assets/Burkina_Faso/GFSAD30AFCE_2015_BF_1"),
+    GFSAD30AFCE_2015_BF_2 = ee.Image("projects/ee-aboubacarhema94/assets/Burkina_Faso/GFSAD30AFCE_2015_BF_2"),
+    GFSAD30AFCE_2015_BF_3 = ee.Image("projects/ee-aboubacarhema94/assets/Burkina_Faso/GFSAD30AFCE_2015_BF_3"),
+    ProtectedAreaPolygons = ee.FeatureCollection("projects/ee-aboubacarhema94/assets/Burkina_Faso/ProtectedAreaPolygons"),
+    ImperviousSurfaceGMIS = ee.Image("projects/ee-aboubacarhema94/assets/Burkina_Faso/BFA_gmis_impervious_surface_percentage_geographic_30m"),
+    GAUL_adm0 = ee.FeatureCollection("projects/ee-aboubacarhema94/assets/Burkina_Faso/gadm41_BFA_0"),
+    GAUL_adm1 = ee.FeatureCollection("projects/ee-aboubacarhema94/assets/Burkina_Faso/gadm41_BFA_1"),
+    GAUL_adm2 = ee.FeatureCollection("projects/ee-aboubacarhema94/assets/Burkina_Faso/gadm41_BFA_2"),
+    geometry = ee.Geometry.Polygon(
+        [[[-6.785424115063194, 15.905890986027938],
+          [-6.785424115063194, 8.676088379414344],
+          [3.4977790099368056, 8.676088379414344],
+          [3.4977790099368056, 15.905890986027938]]], null, false);
 
-    ////////////////////////////////////////////////////
-//IFPRI- Calculate Productive Agriculture  
-//December 2022
-// 
-//Description: Scripts Aggregates Cleared Forest and Cropland datasets, masking slope > 15%, permanent water,
-          // and imprevious surfaces to identify arable land in Burundi at 30m resolution
-////////////////////////////////////////////////////
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////
 //Variables 
-
+Map.setCenter(-2,12.28,7)
 var adm0_name = "Burkina Faso"; 
 var deforestCompYear = 15; //Last two digits of year only
+var waterOccuring = 10; //Set water occuring less than this value (in %) of the time, it is the frequency with which water was present.
 
+//Get AOI of Interest
+////Import GADM data for Burkina Faso (https://gadm.org/data.html)
+var adm0_AOI = GAUL_adm0;
+var adm2_AOI = GAUL_adm2;
+Map.addLayer(adm2_AOI, {color: 'purple'}, 'Burkina Faso Admin2 Boundaries');
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//Imported GFSAD30AFCE Rasters --> 30m 
 //Downloaded from EarthExplorer over Burkina Faso
   //Download URL: https://search.earthdata.nasa.gov/search
   //Dataset URL: https://lpdaac.usgs.gov/products/gfsad30afcev001/
 var GFSAD_1 = GFSAD30AFCE_2015_BF_1;
 var GFSAD_2 = GFSAD30AFCE_2015_BF_2;
 var GFSAD_3 = GFSAD30AFCE_2015_BF_3;
-//////////////////////////////////////////////////////////////////
-//Get AOI of Interest
 
-////Import FAO GAUL 2015 Dataset Adm0 and ADM2 Boundaries and Filter for Burundi
-var adm0_AOI = GAUL_adm0.filterMetadata("ADM0_NAME", "equals", adm0_name);
-var adm2_AOI = GAUL_adm2.filterMetadata("ADM0_NAME", "equals", adm0_name);
-
-Map.addLayer(adm0_AOI);
-Map.addLayer(adm2_AOI);
-
-////////////////////////////////////////////////////////////////
-//Imported GFSAD30AFCE Rasters --> 30m 
-
-//CLip Images to Burkina Extent --> Mask 
+//CLip Images to Burkina Faso Extent --> Mask 
 var clipGFSAD_1 = GFSAD_1.clip(adm0_AOI);
+//var resolution = clipGFSAD_1.projection().nominalScale();
+//print(resolution,'clipGFSAD_1 Resolution');
 var clipGFSAD_2 = GFSAD_2.clip(adm0_AOI);
 var clipGFSAD_3 = GFSAD_3.clip(adm0_AOI);
 
 //Create Image Collection so it can be mosaiced together --> use quality mosaic to get highest 
-var aoi_ALL_LC = ee.ImageCollection.fromImages([clipGFSAD_1, clipGFSAD_2, clipGFSAD_3]).qualityMosaic('b1');
-
-
-//Mask to select Cropland (band b1)
-var aoiCroplandMask = aoi_ALL_LC.select("b1").eq(2);
-
-//Mask Image so that only 2 = CropLand Displays
-var aoiCropland = aoi_ALL_LC.mask(aoiCroplandMask);
-
-
-//Check Pixel Area
-
-var cropMaskVis3 = {
-  min: 0.0,
-  max: 2.0,
-  palette: ['black', 'orange', 'green'],
+var GFSAD = ee.ImageCollection([clipGFSAD_1, clipGFSAD_2, clipGFSAD_3]).mosaic();
+var bin = {
+  bands: ['b1'],
+  min: 0,
+  max: 2,
+  palette: ['red','yellow' , 'green']
 };
+Map.addLayer(GFSAD, bin, adm0_name + ' GFSAD30AFCE Rasters');
+//Mask to select Cropland (band b1 = 2)
+var aoiCropland = GFSAD.eq(2).selfMask().rename("Cropland");
 
-//Map.addLayer(aoiCropland, cropMaskVis3, adm0_name + ' Crop Mask');
+//Unmask Bands Setting values to zero
+var bin = {
+  bands: ['Cropland'],
+  min: 0,
+  max: 1,
+  palette: ['red', 'green']
+};
+Map.addLayer(aoiCropland, bin, adm0_name + ' Cropland in GFSAD');
+var arableFromCropland = aoiCropland.select('Cropland').unmask(0).clip(adm2_AOI)
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////
 
-////////////////////////////////////////////////////////////////
 //Filter Hansen Dataset for cleared forested between 2000 and 2015
-
-var aoi_ALL_CF = Hansen_GFC.clipToCollection(adm0_AOI);
-
+var Hansen = Hansen_GFC.clipToCollection(adm0_AOI);
 //Create Mask, selecting "loss year layer" less than or equal to 2015
-var aoiClearForestMask = aoi_ALL_CF.select("lossyear").lte(15);
+var aoiClearForestMask = Hansen.select("lossyear").lte(deforestCompYear);
 
+//var aoiClearForestMask = Hansen.select("treecover2000").eq(10).rename('lossyear');
 //Mask Collection for only forests cleared between 2000 and 2015
-var aoiClearedForest = aoi_ALL_CF.mask(aoiClearForestMask);
+var aoiClearedForest = Hansen.mask(aoiClearForestMask);
 
 var treeLossVisParam = {
   bands: ['lossyear'],
@@ -85,45 +86,77 @@ var treeLossVisParam = {
   max: 15,
   palette: ['yellow', 'red']
 };
-
-//Map.addLayer(aoiClearedForest, treeLossVisParam, adm0_name + ' Forest Clearance Year');
-//print(aoiClearedForest)
-
-/////////////////////////////////////////////////////////////////
-//Create Images to Mask Slope, Water, Urban
-
-//Slope--> 
-  //Dataset Used: https://developers.google.com/earth-engine/datasets/catalog/USGS_SRTMGL1_003
-  
-  //Calculate Slope for SRTM Dataset and Clip to AOI Extent
-var slope = ee.Terrain.slope(SRTM).clip(adm0_AOI);
-  
-  //Create Mask that will select for slope w/gradient less than 15%
-var flatLandMask = slope.select('slope').lte(15);
-  
-  //Mask Terrain
-var agTerrain = slope.mask(flatLandMask);
-
- // Map.addLayer(agTerrain, {min: 0, max: 60}, 'Flat Land');
-
-//Water --> 
-  //Dataset used --> https://developers.google.com/earth-engine/datasets/catalog/JRC_GSW1_3_GlobalSurfaceWater#bands
-
-  //Clip JRC Image to Aoi and select "occurance" band and unmask image so that nonwater pixels are 0
-var allWaterAOI = surfaceWater.select('occurrence').unmask(0).clip(adm0_AOI);
-
-var waterViz = {
-  bands: ['occurrence'],
-  min: 0.0,
-  max: 100.0,
-  palette: ['ffffff', 'ffbbbb', '0000ff']
+Map.addLayer(aoiClearedForest, treeLossVisParam, adm0_name + ' Forest Clearance Year');
+//Encoded as either 0 (no loss) or else a value in the range 1-20, representing loss detected primarily in the year 2001-2020, respectively.
+var aoiClearedForestLoss = aoiClearedForest.select('lossyear').gt(0).selfMask().rename("loss");
+var bin = {
+  bands: ["loss"],
+  min: 0,
+  max: 1,
+  palette: ['black', 'green']
 };
+Map.addLayer(aoiClearedForestLoss, bin, adm0_name + 'Loss forest bands between 2000 and 2015');
+var aoiClearedForestLoss = aoiClearedForestLoss.select('loss').unmask(0).clip(adm2_AOI)
 
-//Map.addLayer(allWaterAOI, waterViz, adm0_name + ' Water Occurance');
+/////////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+//Add Unmasked Image bands together to create arable land image
+var calcArableLandAOI = arableFromCropland.select('Cropland').add(aoiClearedForestLoss.select("loss"))
+                .rename('arableLand')
+                .clip(adm0_AOI);
+var aoiCropland = calcArableLandAOI.select("arableLand").gt(0).selfMask().rename("arableLand");
+var bin = {
+  bands: ["arableLand"],
+  min: 0,
+  max: 1,
+  palette: ['yellow', 'blue']
+};
+Map.addLayer(aoiCropland, bin, adm0_name + ' Cropland in GFSAD  + cleared forested between 2000 and 2015');
+var aoiCropland = aoiCropland.select('arableLand').unmask(0).clip(adm2_AOI)
+//var resolution = aoiCropland.projection().nominalScale();
+//print(resolution,'aoiCropland Resolution');
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////Global Man-made Impervious Surface (GMIS) Dataset From 
+/*https://sedac.ciesin.columbia.edu/data/set/ulandsat-gmis-v1/data-download
+Estimates of man-made impervioussness percentage (0-100) at 30m spatial resolution derived from global Landsat data for the target year 2010.
+The components/bands include:
+
+1. Percent imperviousness
+
+Value:	
+0-100	Percent impervious.
+200	Areas masked as non-HBASE by the HBASE mask. Users may choose to fill these pixels as 0% impervious.	
+255	NoData, including unmapped areas, pixels with SLC (Scan Line Corrector)-off gaps, pixels covered by cloud/shadow.
+*/
+var GMIS_ImperviousSurface = ImperviousSurfaceGMIS;
+//var GMIS_ImperviousSurface = GMIS_ImperviousSurface.select('b1').unmask(0).clip(adm0_AOI);
+var value = 0
+var mask = GMIS_ImperviousSurface.eq(200);
+var impSurfaceGMISAOI = mask.multiply(value).add(GMIS_ImperviousSurface.multiply(mask.not())).rename('impSurfaceGMIS');
+var mask = impSurfaceGMISAOI.eq(255);
+var impSurfaceGMISAOI = mask.multiply(value).add(impSurfaceGMISAOI.multiply(mask.not())).rename('impSurfaceGMIS');
+var impSurfaceGMISAOI = impSurfaceGMISAOI.select('impSurfaceGMIS').unmask(0).clip(adm0_AOI);
+var bin = {
+  bands: ['impSurfaceGMIS'],
+  min: 0,
+  max: 255,
+  palette: ['grey', '000000']
+};
+Map.addLayer(impSurfaceGMISAOI, bin, adm0_name + 'Impervious Surface');
+
+
+////////////////////
 //Impervious Surface
+  //Dataset URL: https://developers.google.com/earth-engine/datasets/catalog/Tsinghua_FROM-GLC_GAIA_v10
  //Clip Impervious Surface to AOI Extent
-var impSurfaceAOI = imperviousSurface.unmask(0).clip(adm0_AOI);
+  var impSurfaceAOI = imperviousSurface.unmask(0).clip(adm0_AOI);
   
   var visualization = {
   bands: ['change_year_index'],
@@ -138,116 +171,159 @@ var impSurfaceAOI = imperviousSurface.unmask(0).clip(adm0_AOI);
     "31A191","223AB0","B692AC","2DE3F4",
   ]
 };
+Map.addLayer(impSurfaceAOI, visualization, adm0_name + 'Impervious Surface FROM-GLC_GAIA_v10');
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//Clip JRC Image to Aoi and select "occurrence" band and unmask image so that nonwater pixels are 0
+var allWaterAOI = surfaceWater.select('occurrence').unmask(0).clip(adm0_AOI);
+var bin = {
+  bands: ['occurrence'],
+  min: 0,
+  max: 100,
+  palette: ['00FFFF', '0000FF']
+};
+Map.addLayer(allWaterAOI, bin, adm0_name + 'Water occurrence');
 
 
-//Map.addLayer(impSurfaceAOI, visualization, adm0_name + ' Impervious Surface');
+//Create Mask selecting water occuring less than waterOccuring% of the time
+var WaterOccuring = allWaterAOI.select('occurrence').lte(waterOccuring).selfMask().rename('occurrence');
+var bin = {
+  bands: ['occurrence'],
+  min: 0,
+  max: waterOccuring,
+  palette: ['00FFFF', '0000FF']
+};
+Map.addLayer(WaterOccuring, bin, adm0_name + ' water occuring less than ' + waterOccuring + '%');
 
 
-///////////////////////////////////////////////////////////////////////
-//Create Arable Land Image
 
-//Unmask Bands Setting values to zero
-var arableFromCropland = aoiCropland.select('b1').unmask(0);
-var arableClearedForest = aoiClearedForest.select("lossyear").unmask(0);
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 
-//Add Unmasked Image bands together to create arable land image
-var calcArableLandAOI = arableFromCropland.select('b1').add(arableClearedForest.select("lossyear"))
+var combinedImage = ee.Image.cat([aoiCropland, allWaterAOI, impSurfaceGMISAOI]);
+//Mask Selecting Non-Zeros --> not arable land 
+var arableLandMask = combinedImage.select("arableLand").eq(1);
+var maskedNonArable = combinedImage.updateMask(arableLandMask);
+//Create Mask selecting water occuring less than waterOccuring% of the time
+var permWaterMask = maskedNonArable.select('occurrence').lte(10);
+var maskedpermWater = maskedNonArable.updateMask(permWaterMask);
+//Create Mask Eliminating Impermeable Surfaces (not equal to 0) so select 0
+//var impermeableSurfaceMask = maskedpermWater.select('change_year_index').eq(0);
+var impermeableSurfaceMask = maskedpermWater.select('impSurfaceGMIS').eq(0)
+var arableLand = maskedpermWater.updateMask(impermeableSurfaceMask);
+var arableLand = arableLand.select('arableLand').unmask(0).clip(adm0_AOI);
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+var arableLand = arableLand.select('arableLand').eq(1).selfMask();
+var bin = {
+  bands: ["arableLand"],
+  min: 0,
+  max: 1,
+  palette: ['yellow', 'blue']
+};
+//Map.addLayer(arableLand, bin, adm0_name + ' Arable land');
+var resolution = arableLand.projection().nominalScale();
+print(resolution,'arableLand Resolution');
+var stats = arableLand.reduceRegion({
+  reducer: ee.Reducer.sum(),
+  geometry: adm0_AOI,
+  scale: resolution,
+  maxPixels: 1e12
+});
+print(stats, "sum of arableLand binary's band");
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+///// world’s protected areas
+
+//https://www.protectedplanet.net/en
+
+Map.addLayer(ProtectedAreaPolygons, {color: 'red'}, 'Protected Areas polygons');
+
+
+///////
+var properties = ['REP_AREA'];
+var col = ee.Image(properties.map(function(property) {
+  return ProtectedAreaPolygons.select([property])
+    .reduceToImage([property], ee.Reducer.first())
+    .clip(adm0_AOI)
+ }))
+//var ProtectedArea = col.add(ProtectedAreaPointsImg);
+var multiBandMaskImg = col.mask().clip(adm0_AOI);
+//print(multiBandMaskImg)
+var mask = multiBandMaskImg.eq(0);
+var randImg = multiBandMaskImg.updateMask(mask)
+
+var arableLand = arableLand.select('arableLand').add(randImg.select("first"))
                 .rename('arableLand')
                 .clip(adm0_AOI);
-
-
-//Concatenate Arable Land, Slope, Water, Impervious Suface
-var combinedImage = ee.Image.cat([calcArableLandAOI, slope, allWaterAOI, impSurfaceAOI]); 
-
-//MASK out not arable land, slope gte 15%, permanent water, and impervious surfaces
-  //Mask Selecting Non-Zeros --> not arable land 
-var arableLandMask = combinedImage.select("arableLand").gt(0);
-  //Apply Mask
-var maskedNonArable = combinedImage.mask(arableLandMask);
-  
-  //Create Mask selecting water occuring less than 10% of the time
-var permWaterMask = maskedNonArable.select('occurrence').lt(10);
-  //ApplyMask
-var maskedpermWater = maskedNonArable.updateMask(permWaterMask);
-  
-  //Create Mask Eliminating Impermeable Surfaces (not equal to 0) so select 0
-var impermeableSurfaceMask = maskedpermWater.select('change_year_index').eq(0);
-  //ApplyMask
-var arableLand = maskedpermWater.updateMask(impermeableSurfaceMask);
-
-var arableLandVis = {
-  bands: ['arableLand'],
-  min: 1,
-  max: 16,
-  palette: ["90ee90", " #013220"]
+                
+var arableLand = arableLand.select('arableLand').eq(1).selfMask();
+var bin = {
+  bands: ["arableLand"],
+  min: 0,
+  max: 1,
+  palette: ['yellow', 'green']
 };
 
-Map.addLayer(arableLand, arableLandVis, adm0_name + ' Arable Land');
-Map.setCenter(-2,12.28,7)
-
-//Export GeoTIFF of Arable Land 
-
-Export.image.toDrive({
-  image: arableLand.select("arableLand"),
-  folder: "", //set based on user preference
-  description: adm0_name + " arableLand",
-  fileNamePrefix: adm0_name + " arableLand",
-  scale: 30,
-  maxPixels: 10000000000000, //just in case it tops out
-  fileFormat: "GeoTIFF"
+var stats = arableLand.reduceRegion({
+  reducer: ee.Reducer.sum(),
+  geometry: adm0_AOI,
+  scale: resolution,
+  maxPixels: 1e12
 });
-
-
-//--------------------------Calculate Land Area by Region----------------------------------------//
-
-//Caculate Pixel area per arable land pixel
-//Select arable land band from arableLand Image
-var areaImage = arableLand.select('arableLand')
-        //Calculate pixel area --> calculates meters^2
-        .multiply(ee.Image.pixelArea())
-        //Convert to hectares and rename 
-        .multiply(0.0001).rename('areaHectares')
-        //Convert data type from float to integer
-        .toInt();
-
+print(stats, "sum of real arableLand binary's band");
+Map.addLayer(arableLand, bin, adm0_name + ' Arable land');
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//Export GeoTIFF  
+var projection = arableLand.select('arableLand').projection().getInfo();
+// Create a geometry representing an export region.
+// Export the image, specifying the CRS, transform, and region.
+Export.image.toDrive({
+  image: arableLand,
+  description: adm0_name + 'arableLand',
+  crs: projection.crs,
+  crsTransform: projection.transform,
+  region: geometry,
+  maxPixels: 10000000000000
+});
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//var PAG_BF_mosaic = PAG_BF_mosaic.eq(1).selfMask()
+var bin = {
+  bands: ["b1"],
+  min: 0,
+  max: 1,
+  palette: ['yellow', 'blue']
+};
+//Map.addLayer(PAG_BF_mosaic, bin, adm0_name + ' Fernando');
+//////////////////////////////////////////////////////////////////////////////////////////////////
 
 //Create a function to calculate the feature class with ADM2 Name and area in hectares
-var calculateFeatureArea = function(feature) {
-    var areas = areaImage.reduceRegion({
+var calculateFeatureSum = function(feature) {
+    var areas = arableLand.reduceRegion({
     reducer: ee.Reducer.sum(),
     geometry: feature.geometry(),
-    scale: 30,
-    maxPixels: 1e12
+    scale: resolution,
+   maxPixels: 10000000000000
     });
-    var adm2_name = feature.get('ADM2_NAME');
+    var adm2_name = feature.get('NAME_2');
     return ee.Feature(
       feature.geometry(),
-      areas.set('ADM2_NAME', adm2_name));
+      areas.set('NAME_2', adm2_name));
 };
  
 //Map Function to Create
-var sumArableHectares_byADM2 = adm2_AOI.map(calculateFeatureArea);
-
+var sumArable_byADM2 = adm2_AOI.map(calculateFeatureSum);
 
 //Export to CSV
 Export.table.toDrive({
-    collection: sumArableHectares_byADM2,
+    collection: sumArable_byADM2,
     fileNamePrefix: adm0_name + "_arableLandArea_adm2",
     description: adm0_name + "_arableLandArea_adm2" + "_CSV",
     folder: "", //set based on user preference
     fileFormat: 'CSV',
-    selectors: ['ADM2_NAME', 'areaHectares']
+    selectors: ['NAME_2', 'arableLand']
     });
     
-//Export to SHP
-Export.table.toDrive({
-    collection: sumArableHectares_byADM2,
-    fileNamePrefix: adm0_name + "_arableLandArea_adm2",
-    description: adm0_name + "_arableLandArea_adm2" + "_SHAPEFILE",
-    folder: "", //set based on user preference
-    fileFormat: 'SHP',
-    selectors: ['ADM2_NAME', 'areaHectares']
-    
-    });
+/////////////////////////////////////////////////////////////////////////////
 //--------------------------END SCRIPT---------------------------------//
-
