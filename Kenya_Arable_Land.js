@@ -33,7 +33,7 @@ var Hansen_GFC = ee.Image("UMD/hansen/global_forest_change_2020_v1_8"),
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 //Variables 
-
+Map.setCenter(35,1,6);
 var adm0_name = "Kenya"; 
 var deforestCompYear = 15; //Last two digits of year only
 var waterOccuring = 10; //Set water occuring less than this value (in %) of the time, it is the frequency with which water was present.
